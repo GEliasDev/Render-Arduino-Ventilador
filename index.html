@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light}*,*::before,*::after{box-sizing:border-box}body{margin:0}[hidden]{display:none!important}</style>
+<title>Mini ventilador 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Banco de pruebas: visor 3D a la izquierda, instrumento de lectura a la derecha; apilado en pantallas angostas. */
+:root {
+  --bg: #eceff0;
+  --surface: #f8fafa;
+  --fg: #12201f;
+  --muted: #52615f;
+  --line: #cfd8d7;
+  --accent: #00797f;
+  --accent-fg: #ffffff;
+  --ok: #13795b;
+  --viewport-a: #e8eded;
+  --viewport-b: #cfd9d9;
+  --chip: rgba(248, 250, 250, 0.92);
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1213;
+    --surface: #141d1e;
+    --fg: #e4eeee;
+    --muted: #93a5a4;
+    --line: #27393a;
+    --accent: #2cc3c9;
+    --accent-fg: #06191a;
+    --ok: #4cd6a6;
+    --viewport-a: #162224;
+    --viewport-b: #0a1011;
+    --chip: rgba(20, 29, 30, 0.92);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1213;
+  --surface: #141d1e;
+  --fg: #e4eeee;
+  --muted: #93a5a4;
+  --line: #27393a;
+  --accent: #2cc3c9;
+  --accent-fg: #06191a;
+  --ok: #4cd6a6;
+  --viewport-a: #162224;
+  --viewport-b: #0a1011;
+  --chip: rgba(20, 29, 30, 0.92);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 44px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+header h1 { margin: 0; font-size: clamp(1.6rem, 3.4vw, 2.2rem); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 62ch; }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+
+.viewport {
+  position: relative;
+  height: clamp(400px, 72vh, 760px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 38%, var(--viewport-a), var(--viewport-b) 80%);
+  touch-action: none;
+}
+@media (max-width: 900px) { .viewport { height: clamp(360px, 60vh, 540px); } }
+.viewport canvas { display: block; width: 100%; height: 100%; }
+.viewport .fail { padding: 24px; color: var(--muted); }
+
+.labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.tag {
+  position: absolute; left: 0; top: 0;
+  font: 500 11px/1 var(--font-mono);
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  will-change: transform;
+}
+.hint {
+  position: absolute; left: 10px; bottom: 10px; right: 10px;
+  font: 400 12px/1.4 var(--font-mono);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.panel h2 { margin: 0 0 8px; font: 600 11px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+
+.readout { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; align-items: baseline; }
+.readout dt { color: var(--muted); font-size: 13px; }
+.readout dd { margin: 0; font: 500 14px var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; background: transparent; border: 2px solid var(--muted); vertical-align: -1px; transition: background 0.15s, border-color 0.15s; }
+.dot.on { background: var(--ok); border-color: var(--ok); }
+
+.gauge { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 10px; }
+.gauge > i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+.hold {
+  width: 100%;
+  font: 600 15px var(--font-body);
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: transform 0.06s;
+}
+.hold.is-down { transform: translateY(2px); filter: brightness(0.9); }
+.hold:focus-visible, .seg button:focus-visible, .check input:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.note { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button {
+  font: 500 13px var(--font-body);
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
+
+.steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.steps button { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; font: inherit; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+.steps button:hover { border-color: var(--accent); }
+.steps button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+.steps button[aria-pressed="true"] .stepbody strong, .steps button[aria-pressed="true"] .stepbody small { color: var(--accent-fg); }
+.steps button[aria-pressed="true"] .stepnum { background: var(--accent-fg); color: var(--accent); }
+.stepnum { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--line); color: var(--fg); font: 600 11px var(--font-mono); margin-top: 1px; }
+.stepbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stepbody strong { font-size: 13px; font-weight: 600; }
+.stepbody small { font-size: 11.5px; color: var(--muted); }
+
+footer { color: var(--muted); font-size: 13px; max-width: 80ch; }
+
+.info { display: flex; flex-direction: column; gap: 28px; }
+.info h2 { margin: 0 0 12px; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.info table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+.info th, .info td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.info th { font: 600 11px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.info tbody tr:last-child td { border-bottom: 0; }
+.info td:first-child { font-family: var(--font-mono); white-space: nowrap; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+.box h3 { margin: 0 0 10px; font: 600 11px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.box p { margin: 0 0 10px; font-size: 14px; }
+.box p:last-child { margin-bottom: 0; }
+.box ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+
+/* Pantalla completa: barra superior con pestañas, render a todo el alto, panel flotante */
+html, body { height: 100%; }
+body { padding: 0; overflow: hidden; }
+.app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.topbar {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 600; font-size: 1rem; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 4px; flex: none; }
+.tabs button { font: 500 14px var(--font-body); padding: 8px 16px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
+.tabs button:hover { color: var(--fg); }
+.tabs button[aria-selected="true"] { background: var(--fg); color: var(--bg); }
+.tabs button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.view { flex: 1; min-height: 0; }
+.view-render { position: relative; }
+.view-render .viewport { position: absolute; inset: 0; height: auto; border: 0; border-radius: 0; touch-action: auto; }
+.viewport canvas { touch-action: none; }
+.view-render .hint { right: auto; max-width: min(56ch, calc(100% - 20px)); }
+.view-info { overflow-y: auto; padding: 28px max(16px, env(safe-area-inset-right, 0px)) 44px max(16px, env(safe-area-inset-left, 0px)); }
+.panel-toggle {
+  position: absolute; top: 12px; right: 12px; z-index: 6;
+  font: 500 13px var(--font-body); padding: 8px 14px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.panel-toggle:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.view-render .panel {
+  position: absolute; top: 56px; right: 12px; z-index: 5;
+  width: min(320px, calc(100% - 24px)); max-height: calc(100% - 56px - 44px); overflow-y: auto;
+  background: var(--chip); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+@media (prefers-reduced-motion: reduce) { .dot, .hold { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="topbar" aria-label="Secciones">
+    <span class="brand">Mini ventilador</span>
+    <div class="tabs" role="tablist" aria-label="Secciones">
+      <button id="tab-render" type="button" role="tab" aria-selected="true" aria-controls="view-render">Render</button>
+      <button id="tab-info" type="button" role="tab" aria-selected="false" aria-controls="view-info" tabindex="-1">Información</button>
+    </div>
+  </nav>
+  <section id="view-render" class="view view-render" role="tabpanel" aria-labelledby="tab-render">
+    <div id="viewport" class="viewport" role="group" aria-label="Maqueta 3D interactiva del mini ventilador con botón">
+      <div id="labels" class="labels" aria-hidden="true"></div>
+      <div class="hint">Arrastra para girar · rueda o pellizco para acercar · clic sostenido en el botón verde</div>
+      <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="true" aria-controls="panel">Ocultar controles</button>
+      <aside id="panel" class="panel" aria-label="Estado del circuito">
+      <section>
+        <h2>Estado</h2>
+        <dl class="readout" aria-live="polite">
+          <dt>Pin 2 · botón</dt>
+          <dd id="s-pin2">HIGH · suelto</dd>
+          <dt>Pin 9 · transistor</dt>
+          <dd id="s-pin9">LOW</dd>
+          <dt>Motor</dt>
+          <dd><span id="s-dot" class="dot" aria-hidden="true"></span><span id="s-motor">DETENIDO</span></dd>
+          <dt>Velocidad</dt>
+          <dd id="s-vel">0 %</dd>
+          <dt>Pulsaciones</dt>
+          <dd id="s-count">0</dd>
+          <dt>Alimentación</dt>
+          <dd id="s-power">USB</dd>
+        </dl>
+        <div class="gauge" aria-hidden="true"><i id="s-gauge"></i></div>
+      </section>
+
+      <section>
+        <button id="hold" class="hold" type="button">Mantener presionado</button>
+        <p class="note">También funciona con la barra espaciadora. Cada pulsación enciende o apaga el motor. La hélice tarda en arrancar y en frenar, como un motor real.</p>
+      </section>
+
+      <section>
+        <h2>Vista</h2>
+        <div class="seg" id="views" role="group" aria-label="Vista de la cámara">
+          <button type="button" data-view="general" aria-pressed="true">General</button>
+          <button type="button" data-view="ventilador" aria-pressed="false">Ventilador</button>
+          <button type="button" data-view="circuito" aria-pressed="false">Circuito</button>
+        </div>
+        <label class="check"><input id="chk-labels" type="checkbox" checked> Mostrar etiquetas</label>
+        <label class="check"><input id="chk-rotate" type="checkbox"> Girar automáticamente</label>
+        <label class="check"><input id="chk-bat" type="checkbox"> Alimentar con batería (opcional)</label>
+      </section>
+
+      <section>
+        <h2>Pasos de montaje</h2>
+        <ol class="steps" id="steps" aria-label="Pasos de conexión, en orden"></ol>
+        <p class="note">Toca un paso para verlo resaltado en la maqueta. Tócalo otra vez para quitar el resaltado.</p>
+        <p class="note">El pin del Arduino entrega unos 20 mA y un motor pequeño pide 100 a 300 mA. Por eso lleva transistor. El diodo protege al transistor de los picos del motor al apagarse.</p>
+      </section>
+    </aside>
+    </div>
+  </section>
+  <section id="view-info" class="view view-info" role="tabpanel" aria-labelledby="tab-info" hidden>
+    <main class="wrap">
+<header>
+    <h1>Mini ventilador</h1>
+    <p>Maqueta 3D del circuito: un botón enciende y apaga un motor con hélice. El Arduino no mueve el motor directamente: controla un transistor que deja pasar la corriente.</p>
+  </header>
+
+  
+
+  
+
+  <section class="info" aria-label="Materiales y conexiones">
+    <div><h2>Materiales</h2><div class="tablewrap"><table><thead><tr><th>Pieza</th><th>Cant.</th><th>Detalle</th></tr></thead><tbody><tr><td>Arduino Uno + cable USB A-B</td><td>1</td><td>El cable conecta la placa al computador (o a un cargador USB de 5 V) y la alimenta.</td></tr><tr><td>Motor DC pequeño de 3 a 6 V</td><td>1</td><td>Con la hélice puesta en el eje. Los dos cables van al circuito.</td></tr><tr><td>Hélice</td><td>1</td><td>Ajustada al eje del motor. Puede ser de plástico o de cartón recortado.</td></tr><tr><td>Transistor NPN 2N2222 (o PN2222A)</td><td>1</td><td>Es un interruptor electrónico: el Arduino lo activa y él deja pasar la corriente del motor.</td></tr><tr><td>Resistencia de 1 kΩ</td><td>1</td><td>Bandas marrón, negro, rojo. Protege la base del transistor.</td></tr><tr><td>Diodo 1N4007</td><td>1</td><td>Protege al transistor de los picos del motor al apagarse. La raya plateada marca el cátodo.</td></tr><tr><td>Protoboard</td><td>1</td><td>Media o completa. Los rieles de los lados (+ y –) reparten la alimentación.</td></tr><tr><td>Pulsador de 4 patas</td><td>1</td><td>Usa dos patas en diagonal para no conectar dos que ya están unidas por dentro.</td></tr><tr><td>Cables jumper macho-macho</td><td>8 a 10</td><td></td></tr><tr><td>Cartón, palitos de paleta, cinta, pegante y tijeras</td><td>—</td><td>Para la base y el soporte del ventilador.</td></tr><tr><td>Portapilas 4×AA (6 V)</td><td>Opcional</td><td>Para que el motor tenga su propia fuente si consume mucho.</td></tr></tbody></table></div></div>
+    <div><h2>Conexiones paso a paso</h2><div class="tablewrap"><table><thead><tr><th>#</th><th>Desde</th><th>Hasta</th><th>Para qué</th></tr></thead><tbody><tr><td>1</td><td>Arduino 5V</td><td>Riel + de la protoboard</td><td>Reparte los 5 V del USB</td></tr><tr><td>2</td><td>Arduino GND</td><td>Riel GND (–)</td><td>Tierra común</td></tr><tr><td>3</td><td>Pin 9 del Arduino</td><td>Un extremo de la resistencia de 1 kΩ</td><td>Señal de encendido del motor</td></tr><tr><td>4</td><td>Otro extremo de la resistencia</td><td>Base del transistor</td><td>El pin activa el transistor</td></tr><tr><td>5</td><td>Emisor del transistor</td><td>Riel GND</td><td>Retorno de la corriente del motor</td></tr><tr><td>6</td><td>Colector del transistor</td><td>Cable (–) del motor</td><td>El transistor cierra el circuito del motor</td></tr><tr><td>7</td><td>Cable (+) del motor</td><td>Riel +</td><td>Alimenta el motor</td></tr><tr><td>8</td><td>Ánodo del diodo</td><td>Colector (la misma fila del motor –)</td><td>Camino para los picos del motor</td></tr><tr><td>9</td><td>Cátodo del diodo (raya)</td><td>Riel +</td><td>Queda en paralelo con el motor</td></tr><tr><td>10</td><td>Pin 2 del Arduino</td><td>Una pata del pulsador</td><td>Lee si el botón está presionado</td></tr><tr><td>11</td><td>Pata del pulsador en diagonal</td><td>Riel GND</td><td>Al presionar, el pin 2 pasa a LOW</td></tr></tbody></table></div></div>
+    <div class="two">
+      <div class="box"><h3>Alimentación</h3><p>Por defecto el motor toma los 5 V del Arduino, que vienen del cable USB. Sirve para motores pequeños que consuman menos de unos 300 mA.</p>
+      <p>Activa <strong>Alimentar con batería</strong> para ver la otra opción: un portapilas de 4 pilas AA (6 V) con su (+) al riel + y su (–) al riel GND. El motor ya no usa el 5 V del Arduino y el GND queda en común, que es obligatorio.</p></div>
+      <div class="box"><h3>Detalles importantes</h3><ul><li>El motor no va directo al Arduino: un pin entrega unos 20 mA y el motor pide entre 100 y 300 mA. Por eso lleva transistor.</li><li>Verifica las patas del transistor en su hoja de datos. En el PN2222A de plástico, con la cara plana hacia ti, de izquierda a derecha son Emisor, Base y Colector. Otros modelos, como el BC547, tienen otro orden.</li><li>El diodo tiene polaridad: la raya (cátodo) va hacia el positivo.</li><li>Si la hélice gira al revés, invierte los dos cables del motor.</li><li>El botón no lleva resistencia externa: el código activa la resistencia interna con INPUT_PULLUP.</li></ul></div>
+    </div>
+  </section>
+
+  <footer>Esta maqueta repite la lógica de <code>ventilador_boton.ino</code> para que veas el montaje en 3D; no ejecuta el código del microcontrolador. La base y el soporte son de cartón y palitos de paleta, como en el proyecto original.</footer>
+
+    </main>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  'use strict';
+  var host = document.getElementById('viewport');
+  function fail(msg) {
+    var p = document.createElement('p');
+    p.className = 'fail';
+    p.textContent = msg;
+    host.appendChild(p);
+  }
+  if (!window.THREE || !THREE.OrbitControls) { fail('No se pudo cargar el motor 3D. Revisa tu conexión y recarga la página.'); return; }
+
+  var renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
+  catch (e) { fail('Tu navegador no permite gráficos 3D (WebGL) en esta página.'); return; }
+
+  var reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  host.insertBefore(renderer.domElement, host.firstChild);
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(38, 1, 0.1, 140);
+  var V = function (x, y, z) { return new THREE.Vector3(x, y, z); };
+
+  /* ---------- Luces ---------- */
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x4a5a66, 0.9));
+  var sun = new THREE.DirectionalLight(0xffffff, 1.25);
+  sun.position.set(6, 16, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -18; sun.shadow.camera.right = 18;
+  sun.shadow.camera.top = 18; sun.shadow.camera.bottom = -18;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 50;
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+
+  var ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.ShadowMaterial({ opacity: 0.28 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.002;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  /* ---------- Halo de resaltado para los pasos de montaje ---------- */
+  var haloGeo = new THREE.BoxGeometry(1, 1, 1);
+  var halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffa726, transparent: true, opacity: 0, depthWrite: false, depthTest: false }));
+  var haloEdges = new THREE.LineSegments(new THREE.EdgesGeometry(haloGeo), new THREE.LineBasicMaterial({ color: 0xffd54a, transparent: true, opacity: 0, depthTest: false }));
+  halo.renderOrder = 998; haloEdges.renderOrder = 999;
+  scene.add(halo); scene.add(haloEdges);
+  var haloActive = false, haloSize = new THREE.Vector3(1, 1, 1);
+  function showHighlight(objs) {
+    var box = new THREE.Box3(), any = false;
+    (objs || []).forEach(function (o) {
+      if (!o) return;
+      var b = new THREE.Box3().setFromObject(o);
+      if (!b.isEmpty()) { box.union(b); any = true; }
+    });
+    if (!any) { haloActive = false; return; }
+    box.expandByScalar(0.16);
+    box.getSize(haloSize);
+    var c = box.getCenter(new THREE.Vector3());
+    halo.position.copy(c); haloEdges.position.copy(c);
+    haloActive = true;
+  }
+  function hideHighlight() { haloActive = false; }
+
+  /* ---------- Utilidades ---------- */
+  var aniso = renderer.capabilities.getMaxAnisotropy();
+  function mat(color, rough, metal) { return new THREE.MeshStandardMaterial({ color: color, roughness: rough == null ? 0.6 : rough, metalness: metal || 0 }); }
+  function shade(m) { m.castShadow = true; m.receiveShadow = true; return m; }
+  function put(m, parent, x, y, z) { m.position.set(x, y, z); shade(m); parent.add(m); return m; }
+  function box(w, h, d, material) { return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material); }
+  function cyl(rt, rb, h, material, seg) { return new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 24), material); }
+  function seg(a, b, r, material) {
+    var d = new THREE.Vector3().subVectors(b, a), len = d.length();
+    var m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), material);
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(V(0, 1, 0), d.normalize());
+    return shade(m);
+  }
+  function makeTex(w, h, draw) {
+    var c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'), w, h);
+    var t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding; t.anisotropy = aniso;
+    return t;
+  }
+
+  var metal = mat(0xc8ccd0, 0.35, 0.75);
+  var gold = mat(0xd9b24a, 0.35, 0.7);
+  var plastic = mat(0x15181b, 0.55);
+
+  /* ---------- Arduino Uno ---------- */
+  var uno = new THREE.Group(); scene.add(uno);
+  var PIN_TOP = 1.2, HZ = -2.4, HZB = 2.4;
+  var pinA = function (i) { return V(-1.2 + 0.254 * i, PIN_TOP, HZ); };    // SCL SDA AREF GND 13 12 11 10 9 8
+  var pinB = function (k) { return V(1.6 + 0.254 * k, PIN_TOP, HZ); };     // 7 6 5 4 3 2 1 0
+  var pinP = function (i) { return V(-0.5 + 0.254 * i, PIN_TOP, HZB); };   // NC IOREF RESET 3V3 5V GND GND VIN
+
+  put(box(6.86, 0.16, 5.34, mat(0x00878f, 0.5)), uno, 0, 0.08, 0);
+
+  var unoTex = makeTex(686, 534, function (g) {
+    g.fillStyle = '#ffffff'; g.textAlign = 'center';
+    g.font = '700 34px sans-serif'; g.fillText('ARDUINO', 450, 215);
+    g.font = '700 64px sans-serif'; g.fillText('UNO', 450, 285);
+    g.font = '700 14px monospace';
+    g.fillText('GND', 299, 66); g.fillText('9', 426, 66); g.fillText('2', 630, 66);
+    g.font = '700 13px monospace'; g.fillText('5V', 394, 478);
+    g.font = '600 12px monospace'; g.fillText('DIGITAL (PWM ~)', 560, 96);
+    g.fillText('ON', 275, 175);
+    g.fillText('POWER', 235, 478); g.fillText('ANALOG IN', 600, 478);
+    g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 1.5;
+    g.strokeRect(14, 14, 658, 506);
+  });
+  var unoTop = new THREE.Mesh(new THREE.PlaneGeometry(6.86, 5.34), new THREE.MeshStandardMaterial({ map: unoTex, transparent: true, roughness: 0.7, depthWrite: false }));
+  unoTop.rotation.x = -Math.PI / 2; unoTop.position.y = 0.162; uno.add(unoTop);
+
+  put(box(1.25, 0.9, 1.6, mat(0xb9bec3, 0.35, 0.8)), uno, -2.95, 0.61, -1.0);        // USB-B
+  put(box(1.5, 1.1, 0.95, plastic), uno, -2.75, 0.71, 1.85);                         // jack de alimentación
+  put(box(3.5, 0.34, 0.76, plastic), uno, 1.0, 0.36, 1.2);                           // ATmega328P
+  put(box(0.55, 0.28, 0.2, metal), uno, -0.55, 0.3, 1.55);                           // cristal
+  put(cyl(0.16, 0.16, 0.22, mat(0xc0392b, 0.5)), uno, -1.9, 0.27, -1.75);          // reset
+
+  function header(x0, n, z) {
+    put(box(n * 0.254, 0.85, 0.254, plastic), uno, x0 + 0.254 * (n - 1) / 2, 0.585, z);
+    for (var i = 0; i < n; i++) put(box(0.064, 0.36, 0.064, gold), uno, x0 + 0.254 * i, 1.02, z);
+  }
+  header(-1.2, 10, HZ); header(1.6, 8, HZ);
+  header(-0.5, 8, HZB); header(1.9, 6, HZB);
+
+  var ledOn5v = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.12), new THREE.MeshStandardMaterial({ color: 0x0b3d1c, emissive: 0x38e07a, emissiveIntensity: 1.4, roughness: 0.4 }));
+  put(ledOn5v, uno, -0.7, 0.2, -1.2);
+
+  /* ---------- Protoboard ---------- */
+  var BD_TOP = 0.85, BD_X = 4.2, BD_Z = -2.6;
+  var hx = function (i) { return 4.7 + 0.254 * i; };
+  var rA = function (j) { return -1.3 + 0.254 * j; };
+  var rB = function (j) { return 0.478 + 0.254 * j; };
+  var RAIL = -2.2, RAIL_P = RAIL + 0.254;
+
+  put(box(8.2, BD_TOP, 5.5, mat(0xefede6, 0.65)), scene, 8.3, BD_TOP / 2, 0.15);
+  var bbTex = makeTex(1640, 1100, function (g, w, h) {
+    var px = function (x) { return (x - BD_X) * 200; }, pz = function (z) { return (z - BD_Z) * 200; };
+    g.fillStyle = '#efede6'; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(0,0,0,0.10)'; g.fillRect(0, pz(0.0), w, 0.3 * 200);
+    function hole(x, z) { g.fillStyle = '#4b4a45'; g.fillRect(px(x) - 8, pz(z) - 8, 16, 16); }
+    var i, j;
+    for (i = 0; i < 29; i++) {
+      for (j = 0; j < 5; j++) { hole(hx(i), rA(j)); hole(hx(i), rB(j)); }
+      if (i % 6 !== 5 && i < 28) {
+        hole(hx(i), RAIL); hole(hx(i), RAIL_P); hole(hx(i), 2.35); hole(hx(i), 2.604);
+      }
+    }
+    g.lineWidth = 5;
+    function line(z, color) { g.strokeStyle = color; g.beginPath(); g.moveTo(px(4.5), pz(z)); g.lineTo(px(12.0), pz(z)); g.stroke(); }
+    line(-2.42, '#2f6fd6'); line(-1.72, '#d33a2f'); line(2.12, '#d33a2f'); line(2.8, '#2f6fd6');
+    g.font = '600 26px monospace'; g.textAlign = 'center';
+    g.fillStyle = '#2f6fd6'; g.fillText('−', px(4.42), pz(RAIL) + 9);
+    g.fillStyle = '#d33a2f'; g.fillText('+', px(4.42), pz(RAIL_P) + 9);
+    g.fillStyle = '#7c7a72'; g.font = '500 20px monospace';
+    [1, 5, 10, 15, 20, 25].forEach(function (n) { g.fillText(String(n), px(hx(n - 1)), pz(-1.52)); });
+  });
+  var bbTop = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 5.5), new THREE.MeshStandardMaterial({ map: bbTex, roughness: 0.7 }));
+  bbTop.rotation.x = -Math.PI / 2; bbTop.position.set(8.3, BD_TOP + 0.001, 0.15); bbTop.receiveShadow = true; scene.add(bbTop);
+
+  /* ---------- Resistencia 1 kΩ (marrón, negro, rojo, dorado) ---------- */
+  var rz = rA(2), rx1 = hx(5), rx2 = hx(9), ry = BD_TOP + 0.26, rcx = (rx1 + rx2) / 2;
+  var resistorGroup = new THREE.Group(); scene.add(resistorGroup);
+  resistorGroup.add(seg(V(rx1, BD_TOP - 0.12, rz), V(rx1, ry, rz), 0.022, metal));
+  resistorGroup.add(seg(V(rx1, ry, rz), V(rx2, ry, rz), 0.022, metal));
+  resistorGroup.add(seg(V(rx2, ry, rz), V(rx2, BD_TOP - 0.12, rz), 0.022, metal));
+  var rBody = cyl(0.1, 0.1, 0.62, mat(0xd9b88f, 0.6)); rBody.rotation.z = Math.PI / 2; put(rBody, resistorGroup, rcx, ry, rz);
+  [[-0.21, 0x6d4c41], [-0.11, 0x111111], [-0.01, 0xd32f2f], [0.2, 0xc9a227]].forEach(function (b) {
+    var band = cyl(0.104, 0.104, 0.05, mat(b[1], 0.5)); band.rotation.z = Math.PI / 2; put(band, resistorGroup, rcx + b[0], ry, rz);
+  });
+
+  /* ---------- Transistor 2N2222: emisor, base, colector ---------- */
+  var tz = rA(3), tE = hx(8), tB = hx(9), tC = hx(10);
+  var transistorGroup = new THREE.Group(); scene.add(transistorGroup);
+  [tE, tB, tC].forEach(function (x) { transistorGroup.add(seg(V(x, BD_TOP - 0.12, tz), V(x, BD_TOP + 0.3, tz), 0.022, metal)); });
+  var tBody = cyl(0.2, 0.2, 0.5, plastic, 28); tBody.scale.z = 0.8; put(tBody, transistorGroup, tB, BD_TOP + 0.55, tz);
+  put(new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), plastic), transistorGroup, tB, BD_TOP + 0.8, tz).scale.z = 0.8;
+
+  /* ---------- Diodo 1N4007: ánodo en el colector, cátodo (raya) al + ---------- */
+  var dz = rA(0), dx1 = hx(10), dx2 = hx(14), dy = BD_TOP + 0.2, dcx = (dx1 + dx2) / 2;
+  var diodeGroup = new THREE.Group(); scene.add(diodeGroup);
+  diodeGroup.add(seg(V(dx1, BD_TOP - 0.12, dz), V(dx1, dy, dz), 0.022, metal));
+  diodeGroup.add(seg(V(dx1, dy, dz), V(dx2, dy, dz), 0.022, metal));
+  diodeGroup.add(seg(V(dx2, dy, dz), V(dx2, BD_TOP - 0.12, dz), 0.022, metal));
+  var dBody = cyl(0.09, 0.09, 0.55, plastic, 20); dBody.rotation.z = Math.PI / 2; put(dBody, diodeGroup, dcx, dy, dz);
+  var dBand = cyl(0.094, 0.094, 0.08, mat(0xd8dcdf, 0.4, 0.3), 20); dBand.rotation.z = Math.PI / 2; put(dBand, diodeGroup, dcx + 0.2, dy, dz);
+
+  /* ---------- Pulsador ---------- */
+  var bx = (hx(17) + hx(19)) / 2, bz = (rA(4) + rB(0)) / 2;
+  var buttonLegs = [[hx(17), rB(0)], [hx(19), rB(0)], [hx(17), rA(4)], [hx(19), rA(4)]].map(function (p) {
+    var leg = seg(V(p[0], BD_TOP - 0.1, p[1]), V(p[0], BD_TOP + 0.12, p[1]), 0.026, metal);
+    scene.add(leg); return leg;
+  });
+  var btnBase = put(box(0.62, 0.3, 0.62, mat(0x23272b, 0.5)), scene, bx, BD_TOP + 0.21, bz);
+  var capGroup = new THREE.Group(); capGroup.position.set(bx, BD_TOP + 0.46, bz); scene.add(capGroup);
+  var btnCap = put(cyl(0.2, 0.2, 0.2, mat(0x2fbf71, 0.4), 32), capGroup, 0, 0, 0);
+  var capY0 = capGroup.position.y;
+  var hit = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 1.0), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  hit.position.set(bx, BD_TOP + 0.4, bz); scene.add(hit);
+  var pickables = [btnCap, btnBase, hit];
+
+  /* ---------- Ventilador de cartón (detrás de la protoboard) ---------- */
+  var DX = 4.3, DZ = -8.2, FLOOR = 0.15, MOTOR_Y = 3.2, BLADE_Z = 1.2;
+  var fan = new THREE.Group(); fan.position.set(DX, 0, DZ); scene.add(fan);
+  var card = mat(0xc4a77d, 0.9), cardDark = mat(0xb08f62, 0.9), stick = mat(0xe6c892, 0.8);
+
+  put(box(5.4, FLOOR, 4.0, card), fan, 0, FLOOR / 2, 1.4);                                   // base de cartón
+  put(box(0.9, 2.6, 0.9, cardDark), fan, 0, FLOOR + 1.3, 0);                                  // soporte
+  [-1, 1].forEach(function (s) {                                                              // palitos de paleta como refuerzo
+    var st = box(0.14, 1.9, 0.04, stick); st.rotation.z = s * 0.38; put(st, fan, s * 0.78, FLOOR + 0.95, 0.47);
+  });
+  var motorMat = mat(0xb9bec3, 0.35, 0.8);
+  var mBody = cyl(0.42, 0.42, 1.3, motorMat, 32); mBody.rotation.x = Math.PI / 2; put(mBody, fan, 0, MOTOR_Y, 0.3);
+  var mCap = cyl(0.43, 0.43, 0.08, mat(0x23272b, 0.5), 32); mCap.rotation.x = Math.PI / 2; put(mCap, fan, 0, MOTOR_Y, -0.38);
+  var motorTerms = [-0.15, 0.15].map(function (x) { return put(box(0.06, 0.2, 0.05, gold), fan, x, MOTOR_Y, -0.48); });   // terminales
+
+  var blades = new THREE.Group(); blades.position.set(0, MOTOR_Y, BLADE_Z); fan.add(blades);
+  var shaft = cyl(0.05, 0.05, 0.6, metal, 12); shaft.rotation.x = Math.PI / 2; put(shaft, fan, 0, MOTOR_Y, 1.0);
+  var hub = cyl(0.24, 0.24, 0.3, mat(0x1a2433, 0.5), 24); hub.rotation.x = Math.PI / 2; blades.add(shade(hub));
+  var bladeMat = new THREE.MeshStandardMaterial({ color: 0x9ec9e8, roughness: 0.4, transparent: true, opacity: 0.92, side: THREE.DoubleSide });
+  for (var k = 0; k < 4; k++) {
+    var arm = new THREE.Group(); arm.rotation.z = k * Math.PI / 2; blades.add(arm);
+    var bl = box(0.55, 1.65, 0.04, bladeMat); bl.rotation.y = 0.5; put(bl, arm, 0, 1.05, 0);
+  }
+  var ring = new THREE.Mesh(new THREE.TorusGeometry(2.1, 0.035, 8, 64), mat(0x9aa4a6, 0.4, 0.6)); put(ring, fan, 0, MOTOR_Y, 1.75);
+  [0, Math.PI / 2].forEach(function (a) {
+    var sp = cyl(0.02, 0.02, 4.2, mat(0x9aa4a6, 0.4, 0.6), 8); sp.rotation.z = a; put(sp, fan, 0, MOTOR_Y, 1.75);
+  });
+
+  // Viento: rayas que avanzan frente a la hélice cuando gira
+  var streaks = [];
+  for (var s = 0; s < 14; s++) {
+    var sm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+    var sk = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.9), sm);
+    scene.add(sk);
+    streaks.push({ m: sk, a: Math.random() * Math.PI * 2, r: 0.35 + Math.random() * 1.5, t: Math.random() * 3 });
+  }
+
+  /* ---------- Cables ---------- */
+  function house(p, color) {
+    var h = box(0.24, 0.5, 0.24, mat(color, 0.5)); return put(h, scene, p.x, PIN_TOP + 0.2, p.z);
+  }
+  function tube(pts, o) {
+    var curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+    var tm = shade(new THREE.Mesh(new THREE.TubeGeometry(curve, 120, o.r || 0.04, 8, false), mat(o.color, 0.45)));
+    scene.add(tm); return tm;
+  }
+  function wire(a, b, o) {
+    var lift = o.lift == null ? 0.45 : o.lift;
+    var mid = a.clone().lerp(b, 0.5); mid.y = Math.max(a.y, b.y) + o.h; mid.z += o.offZ || 0;
+    return tube([a.clone(), a.clone().add(V(0, lift, 0)), mid, b.clone().add(V(0, lift, 0)), b.clone()], o);
+  }
+  // Cable del motor: baja por detrás, corre por el suelo y sube por el borde de la protoboard.
+  function motorWire(sx, e, color) {
+    return tube([
+      V(sx, MOTOR_Y, DZ - 0.5), V(sx, MOTOR_Y - 0.8, DZ - 0.9), V(sx, 0.9, DZ - 1.3), V(sx, 0.1, DZ - 1.9),
+      V(e.x, 0.1, -3.6), V(e.x, 0.5, -3.1), V(e.x, BD_TOP + 0.6, -2.75), V(e.x, BD_TOP + 0.4, e.z - 0.15), V(e.x, BD_TOP - 0.05, e.z)
+    ], { color: color });
+  }
+  var p9 = pinA(8), pGnd = pinA(3), p2 = pinB(5), p5v = pinP(4);
+  var houseP9 = house(p9, 0xf08a00), houseGnd = house(pGnd, 0x1d1d1d), houseP2 = house(p2, 0x2f80ed), house5v = house(p5v, 0xd32f2f);
+
+  var wireP9 = wire(V(p9.x, PIN_TOP + 0.47, p9.z), V(hx(5), BD_TOP - 0.05, rA(1)), { h: 1.2, offZ: -0.5, color: 0xf08a00 });     // pin 9 -> resistencia
+  var wireP2 = wire(V(p2.x, PIN_TOP + 0.47, p2.z), V(hx(17), BD_TOP - 0.05, rB(1)), { h: 1.5, offZ: 0.2, color: 0x2f80ed });      // pin 2 -> botón
+  var wireGnd = wire(V(pGnd.x, PIN_TOP + 0.47, pGnd.z), V(hx(2), BD_TOP - 0.05, RAIL), { h: 0.8, offZ: -0.5, color: 0x1d1d1d });   // GND -> riel
+  var wire5v = wire(V(p5v.x, PIN_TOP + 0.47, p5v.z), V(hx(4), BD_TOP - 0.05, RAIL_P), { h: 1.9, offZ: 0, color: 0xd32f2f });      // 5V -> riel +
+  var jump = { h: 0.08, lift: 0.22, r: 0.035 };
+  var wireEmisor = wire(V(hx(8), BD_TOP + 0.01, rA(1)), V(hx(8), BD_TOP + 0.01, RAIL), { h: jump.h, lift: jump.lift, r: jump.r, color: 0x1d1d1d });      // emisor -> GND
+  var wireCatodo = wire(V(hx(14), BD_TOP + 0.01, rA(1)), V(hx(14), BD_TOP + 0.01, RAIL_P), { h: jump.h, lift: jump.lift, r: jump.r, color: 0xd32f2f });  // cátodo -> +
+  var wireBtnGnd = wire(V(hx(19), BD_TOP + 0.01, rA(0)), V(hx(19), BD_TOP + 0.01, RAIL), { h: jump.h, lift: jump.lift, r: jump.r, color: 0x1d1d1d });    // botón -> GND
+  var wireMotorPlus = motorWire(DX + 0.15, V(hx(12), 0, RAIL_P), 0xd32f2f);   // motor (+) -> riel +
+  var wireMotorMinus = motorWire(DX - 0.15, V(hx(10), 0, rA(1)), 0x2b2b2b);    // motor (–) -> colector
+
+  /* ---------- Etiquetas HTML ---------- */
+  var labelHost = document.getElementById('labels');
+  /* ---------- Cable USB: alimenta el Arduino ---------- */
+  function tubeL(pts, color, r, parent) {
+    var m = shade(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4), 90, r, 8, false), mat(color, 0.5)));
+    (parent || scene).add(m); return m;
+  }
+  put(box(0.9, 0.62, 1.1, mat(0xb9bec3, 0.35, 0.8)), scene, -3.95, 0.61, -1.0);
+  put(box(0.7, 0.8, 1.3, plastic), scene, -4.7, 0.61, -1.0);
+  tubeL([V(-5.05, 0.6, -1.0), V(-5.9, 0.3, -1.0), V(-6.7, 0.1, -0.3), V(-7.7, 0.1, 0.5)], 0x1a1a1a, 0.1);
+  var extraLabelDefs = [['Cable USB (alimenta todo)', V(-6.3, 0.6, -0.6)]];
+
+  /* ---------- Portapilas 4×AA opcional ---------- */
+  var chkBat = document.getElementById('chk-bat');
+  var battery = new THREE.Group(); battery.visible = false; scene.add(battery);
+  put(box(4.8, 1.3, 2.2, mat(0x20262b, 0.6)), battery, 9.9, 0.65, -5.6);
+  var batTex = makeTex(480, 220, function (g, w, h) {
+    g.fillStyle = '#20262b'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#ffffff'; g.textAlign = 'center';
+    g.font = '700 58px sans-serif'; g.fillText('4×AA', w / 2, 108);
+    g.font = '600 36px monospace'; g.fillText('6 V', w / 2, 166);
+  });
+  var batTop = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 2.2), new THREE.MeshStandardMaterial({ map: batTex, roughness: 0.6 }));
+  batTop.rotation.x = -Math.PI / 2; batTop.position.set(9.9, 1.302, -5.6); battery.add(batTop);
+  tubeL([V(9.0, 1.3, -4.5), V(9.0, 1.6, -4.3), V(8.9, 1.9, -3.4), V(hx(16), BD_TOP + 0.45, RAIL_P - 0.4), V(hx(16), BD_TOP - 0.05, RAIL_P)], 0xd32f2f, 0.04, battery);
+  tubeL([V(10.4, 1.3, -4.5), V(10.4, 1.6, -4.3), V(9.6, 1.9, -3.4), V(hx(15), BD_TOP + 0.45, RAIL - 0.4), V(hx(15), BD_TOP - 0.05, RAIL)], 0x1d1d1d, 0.04, battery);
+  extraLabelDefs.push(['Portapilas 4×AA (opcional)', V(9.9, 1.9, -5.6), function () { return chkBat.checked; }]);
+  chkBat.addEventListener('change', function () {
+    var on = this.checked;
+    battery.visible = on; wire5v.visible = !on; house5v.visible = !on;
+    document.getElementById('s-power').textContent = on ? 'Batería 4×AA' : 'USB';
+  });
+
+  var labelDefs = extraLabelDefs.concat([
+    ['Arduino Uno', V(-1.6, 0.5, 1.0)],
+    ['Pin 9', V(p9.x, PIN_TOP + 1.15, p9.z)],
+    ['Pin 2', V(p2.x, PIN_TOP + 1.15, p2.z)],
+    ['Pulsador', V(bx, BD_TOP + 0.95, bz)],
+    ['Transistor 2N2222', V(tB, BD_TOP + 1.45, tz)],
+    ['Diodo 1N4007', V(dcx + 0.9, BD_TOP + 0.45, dz)],
+    ['Motor', V(DX, MOTOR_Y + 0.75, DZ + 0.3)],
+    ['Hélice', V(DX + 1.1, MOTOR_Y + 1.5, DZ + BLADE_Z)]
+  ]).map(function (d) {
+    var el = document.createElement('div'); el.className = 'tag'; el.textContent = d[0]; labelHost.appendChild(el);
+    return { el: el, pos: d[1], vis: d[2] };
+  });
+  function placeLabels(w, h) {
+    if (labelHost.hidden) return;
+    labelDefs.forEach(function (l) {
+      if (l.vis && !l.vis()) { l.el.style.visibility = 'hidden'; return; }
+      var v = l.pos.clone().project(camera);
+      if (v.z > 1) { l.el.style.visibility = 'hidden'; return; }
+      l.el.style.visibility = 'visible';
+      l.el.style.transform = 'translate(' + ((v.x * 0.5 + 0.5) * w).toFixed(1) + 'px,' + ((-v.y * 0.5 + 0.5) * h).toFixed(1) + 'px) translate(-50%,-110%)';
+    });
+  }
+
+  /* ---------- Cámara y controles ---------- */
+  var controls;
+  var presets = {
+    general:    { target: V(4.3, 1.9, -2.8), dir: V(0, 0.78, 0.62), width: 17.5, min: 19 },
+    ventilador: { target: V(4.3, 3.0, -6.8), dir: V(0.35, 0.3, 0.9), width: 7.5, min: 9 },
+    circuito:   { target: V(4.4, 0.5, 0.0),  dir: V(0, 0.9, 0.44),  width: 16.5, min: 13 }
+  };
+  var current = 'general', userMoved = false, tween = null;
+  function goTo(name, instant) {
+    var p = presets[name]; current = name;
+    var d = Math.max(p.min, p.width / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect) * 1.06);
+    var toT = p.target.clone(), toP = toT.clone().addScaledVector(p.dir.clone().normalize(), d);
+    if (instant || reduced) { camera.position.copy(toP); controls.target.copy(toT); controls.update(); tween = null; return; }
+    tween = { t0: performance.now(), dur: 800, fp: camera.position.clone(), ft: controls.target.clone(), tp: toP, tt: toT };
+  }
+
+  /* ---------- Entrada: botón físico = pin 2 ---------- */
+  var src = { canvas: false, hold: false, key: false };
+  var pressedPhys = false;
+  var holdBtn = document.getElementById('hold');
+  function setSrc(k, v) { src[k] = v; pressedPhys = src.canvas || src.hold || src.key; holdBtn.classList.toggle('is-down', pressedPhys); }
+  var ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function overButton(ev) {
+    var r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    return ray.intersectObjects(pickables, false).length > 0;
+  }
+  // Se registra antes que los controles para poder bloquear el giro cuando el clic cae en el botón.
+  renderer.domElement.addEventListener('pointerdown', function (ev) {
+    if (overButton(ev)) { setSrc('canvas', true); if (controls) controls.enabled = false; }
+  });
+  function release() { if (src.canvas) { setSrc('canvas', false); } if (controls) controls.enabled = true; }
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+  renderer.domElement.addEventListener('pointermove', function (ev) {
+    if (ev.buttons) return;
+    renderer.domElement.style.cursor = overButton(ev) ? 'pointer' : 'grab';
+  });
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.maxPolarAngle = Math.PI / 2 - 0.04;
+  controls.minDistance = 4; controls.maxDistance = 40;
+  controls.autoRotateSpeed = 1.2;
+  controls.addEventListener('start', function () { userMoved = true; tween = null; });
+
+  holdBtn.addEventListener('pointerdown', function (ev) { setSrc('hold', true); if (holdBtn.setPointerCapture) holdBtn.setPointerCapture(ev.pointerId); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (t) { holdBtn.addEventListener(t, function () { setSrc('hold', false); }); });
+  document.addEventListener('keydown', function (e) { if (e.code === 'Space' && !e.repeat && host.clientWidth && !(e.target.closest && e.target.closest('[role="tab"], input, a'))) { e.preventDefault(); setSrc('key', true); } });
+  document.addEventListener('keyup', function (e) { if (e.code === 'Space') { setSrc('key', false); } });
+  window.addEventListener('blur', function () { setSrc('key', false); setSrc('hold', false); release(); });
+
+  document.getElementById('views').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-view]'); if (!b) return;
+    [].forEach.call(this.querySelectorAll('button'), function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+    userMoved = false; goTo(b.dataset.view, false);
+  });
+  document.getElementById('chk-labels').addEventListener('change', function () { labelHost.hidden = !this.checked; });
+  document.getElementById('chk-rotate').addEventListener('change', function () { controls.autoRotate = this.checked && !reduced; });
+
+  /* ---------- Pasos de montaje: al tocar uno, se resalta en la maqueta ---------- */
+  var STEPS = [
+    { n: 1, t: 'Arduino 5V → riel +', d: 'Reparte los 5 V del USB por la protoboard.', view: 'circuito', get: function () { return [house5v, wire5v]; } },
+    { n: 2, t: 'Arduino GND → riel GND (–)', d: 'Tierra común para todo el circuito.', view: 'circuito', get: function () { return [houseGnd, wireGnd]; } },
+    { n: 3, t: 'Pin 9 → resistencia de 1 kΩ', d: 'Señal de encendido del motor.', view: 'circuito', get: function () { return [houseP9, wireP9, resistorGroup]; } },
+    { n: 4, t: 'Resistencia → base del transistor', d: 'El pin activa el transistor a través de la resistencia.', view: 'circuito', get: function () { return [resistorGroup, transistorGroup]; } },
+    { n: 5, t: 'Emisor del transistor → riel GND', d: 'Retorno de la corriente del motor.', view: 'circuito', get: function () { return [transistorGroup, wireEmisor]; } },
+    { n: 6, t: 'Colector del transistor → motor (–)', d: 'El transistor cierra el circuito del motor.', view: 'general', get: function () { return [transistorGroup, wireMotorMinus].concat(motorTerms); } },
+    { n: 7, t: 'Motor (+) → riel +', d: 'Alimenta el motor con los 5 V.', view: 'general', get: function () { return [wireMotorPlus].concat(motorTerms); } },
+    { n: 8, t: 'Ánodo del diodo → colector', d: 'Camino para los picos del motor al apagarse.', view: 'circuito', get: function () { return [diodeGroup, transistorGroup]; } },
+    { n: 9, t: 'Cátodo del diodo (raya) → riel +', d: 'Queda en paralelo con el motor.', view: 'circuito', get: function () { return [diodeGroup, wireCatodo]; } },
+    { n: 10, t: 'Pin 2 → pulsador', d: 'Lee si el botón está presionado.', view: 'circuito', get: function () { return [houseP2, wireP2, btnBase, capGroup].concat(buttonLegs); } },
+    { n: 11, t: 'Pulsador (pata diagonal) → riel GND', d: 'Al presionar, el pin 2 pasa a LOW.', view: 'circuito', get: function () { return [btnBase, capGroup, wireBtnGnd].concat(buttonLegs); } }
+  ];
+  var stepsHost = document.getElementById('steps'), activeStep = null;
+  STEPS.forEach(function (st) {
+    var li = document.createElement('li');
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.setAttribute('aria-pressed', 'false'); btn.dataset.step = st.n;
+    btn.innerHTML = '<span class="stepnum">' + st.n + '</span><span class="stepbody"><strong>' + st.t + '</strong><small>' + st.d + '</small></span>';
+    li.appendChild(btn); stepsHost.appendChild(li);
+  });
+  function selectStep(n) {
+    var btns = stepsHost.querySelectorAll('button');
+    if (activeStep === n) {
+      activeStep = null;
+      [].forEach.call(btns, function (b) { b.setAttribute('aria-pressed', 'false'); });
+      hideHighlight();
+      return;
+    }
+    activeStep = n;
+    [].forEach.call(btns, function (b) { b.setAttribute('aria-pressed', b.dataset.step == n ? 'true' : 'false'); });
+    var st = STEPS[n - 1];
+    showHighlight(st.get());
+    userMoved = false;
+    goTo(st.view, false);
+    [].forEach.call(document.querySelectorAll('#views button'), function (b) { b.setAttribute('aria-pressed', b.dataset.view === st.view ? 'true' : 'false'); });
+  }
+  stepsHost.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-step]'); if (!b) return;
+    selectStep(Number(b.dataset.step));
+  });
+
+  /* ---------- Lógica del sketch (loop de ventilador_boton.ino) ---------- */
+  var ANTIREBOTE_MS = 50, OMEGA_MAX = 16;          // rad/s de la hélice a plena velocidad
+  var motorEncendido = false, estadoAnterior = true;   // HIGH = suelto (INPUT_PULLUP)
+  var ultimoCambio = -1000, count = 0, omega = 0, lastNow = 0;
+  var ui = {
+    pin2: document.getElementById('s-pin2'), pin9: document.getElementById('s-pin9'), motor: document.getElementById('s-motor'),
+    vel: document.getElementById('s-vel'), dot: document.getElementById('s-dot'), count: document.getElementById('s-count'), gauge: document.getElementById('s-gauge')
+  };
+  var shown = {};
+  function setText(el, key, text) { if (shown[key] !== text) { shown[key] = text; el.textContent = text; } }
+  function sketchLoop(ahora) {
+    var estadoActual = !pressedPhys;                                           // digitalRead(PIN_BOTON)
+    if (estadoAnterior === true && estadoActual === false && ahora - ultimoCambio > ANTIREBOTE_MS) {
+      motorEncendido = !motorEncendido; ultimoCambio = ahora; count++;        // digitalWrite(PIN_MOTOR, ...)
+    }
+    estadoAnterior = estadoActual;
+    setText(ui.pin2, 'p2', estadoActual ? 'HIGH · suelto' : 'LOW · presionado');
+    setText(ui.pin9, 'p9', motorEncendido ? 'HIGH' : 'LOW');
+  }
+  function updateReadout() {
+    var pct = Math.round(omega / OMEGA_MAX * 100);
+    var estado = motorEncendido ? (pct >= 97 ? 'GIRANDO' : 'ARRANCANDO') : (pct <= 2 ? 'DETENIDO' : 'FRENANDO');
+    setText(ui.motor, 'mo', estado);
+    setText(ui.vel, 've', pct + ' %');
+    setText(ui.count, 'n', String(count));
+    ui.dot.classList.toggle('on', pct > 2);
+    ui.gauge.style.width = pct + '%';
+  }
+
+  /* ---------- Render ---------- */
+  var lastShift = 0;
+  function panelShift() {
+    var p = document.getElementById('panel');
+    return (p && !p.hidden && host.clientWidth > 900) ? Math.round((p.offsetWidth + 24) / 2) : 0;
+  }
+  function resize() {
+    var w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    lastShift = panelShift();
+    if (lastShift) camera.setViewOffset(w, h, lastShift, 0, w, h); else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+    if (!userMoved && !tween) goTo(current, true);
+  }
+  new ResizeObserver(resize).observe(host);
+  resize();
+  goTo('general', true);
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (panelShift() !== lastShift) resize();
+    var dt = Math.min(0.05, (now - (lastNow || now)) / 1000); lastNow = now;
+    sketchLoop(now);
+
+    // El motor acelera y frena de forma gradual (inercia de la hélice).
+    var target = motorEncendido ? OMEGA_MAX : 0;
+    omega += (target - omega) * (1 - Math.exp(-dt * (motorEncendido ? 2.4 : 1.1)));
+    if (Math.abs(omega - target) < 0.02) omega = target;
+    blades.rotation.z -= omega * dt;
+    updateReadout();
+
+    var f = omega / OMEGA_MAX;
+    streaks.forEach(function (s) {
+      s.t = (s.t + dt * (1 + 5 * f)) % 3;
+      s.m.position.set(DX + Math.cos(s.a) * s.r, MOTOR_Y + Math.sin(s.a) * s.r, DZ + 2.0 + s.t);
+      s.m.material.opacity = 0.55 * f * (1 - s.t / 3);
+    });
+    capGroup.position.y += ((pressedPhys ? capY0 - 0.1 : capY0) - capGroup.position.y) * (reduced ? 1 : 0.4);
+
+    if (haloActive) {
+      var pulse = 0.5 + 0.5 * Math.sin(now * 0.004);
+      halo.scale.copy(haloSize); haloEdges.scale.copy(haloSize);
+      halo.material.opacity = 0.09 + 0.08 * pulse;
+      haloEdges.material.opacity = 0.5 + 0.4 * pulse;
+    } else {
+      halo.material.opacity = 0; haloEdges.material.opacity = 0;
+    }
+
+    if (tween) {
+      var t = Math.min(1, (now - tween.t0) / tween.dur), e = t * t * (3 - 2 * t);
+      camera.position.lerpVectors(tween.fp, tween.tp, e);
+      controls.target.lerpVectors(tween.ft, tween.tt, e);
+      if (t >= 1) tween = null;
+    }
+    controls.update();
+    if (host.clientWidth) { renderer.render(scene, camera); placeLabels(host.clientWidth, host.clientHeight); }
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+<script>
+(function () {
+  var tabs = [].slice.call(document.querySelectorAll('.tabs [role="tab"]'));
+  function select(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+    try { history.replaceState(null, '', tab === tabs[1] ? '#informacion' : '#render'); } catch (e) {}
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { select(t); });
+    t.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        var n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        n.focus(); select(n);
+      }
+    });
+  });
+  if (location.hash === '#informacion') select(tabs[1]);
+
+  var tog = document.getElementById('panel-toggle'), panel = document.getElementById('panel');
+  function setPanel(open) {
+    panel.hidden = !open;
+    tog.setAttribute('aria-expanded', open ? 'true' : 'false');
+    tog.textContent = open ? 'Ocultar controles' : 'Controles';
+  }
+  setPanel(!(window.matchMedia && matchMedia('(max-width: 900px)').matches));
+  tog.addEventListener('click', function () { setPanel(panel.hidden); });
+})();
+</script>
+</body>
+</html>
